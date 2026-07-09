@@ -7,12 +7,9 @@ import (
 	"log"
 	"runtime"
 	"time"
-
-	import (
-    "torrent-client/client"
-    "torrent-client/message"
-    "torrent-client/peers"
-)
+	"torrent-client/client"
+	"torrent-client/message"
+	"torrent-client/peers"
 )
 
 // MaxBlockSize is the largest number of bytes a request can ask for
