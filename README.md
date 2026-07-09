@@ -31,6 +31,10 @@ Download the Ubuntu ISO using the provided test torrent file:
 ./torrent-client ubuntu-26.04-desktop-amd64.iso.torrent ubuntu.iso
 ```
 
-## Acknowledgments
+## Differences from Original Project
 
 This project was inspired by and built upon the excellent guide by [veggiedefender/torrent-client](https://github.com/veggiedefender/torrent-client/).
+
+However, this implementation introduces key improvements over the original for better robustness and real-world usage:
+- **Disk Streaming vs RAM Buffering**: The original implementation allocated a single byte array in memory, storing the entire file in RAM before writing it to disk. This version opens the output file immediately and streams pieces directly to disk as they arrive, allowing you to download massive files without exhausting system memory.
+- **Deadlock Prevention**: The original implementation could deadlock and hang indefinitely if all peer connections dropped before the download finished. This version introduces a signaling channel to detect when all worker goroutines have exited, ensuring the client cleanly terminates with an error instead of hanging.
