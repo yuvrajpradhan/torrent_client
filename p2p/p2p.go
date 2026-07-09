@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"fmt"
+	"io"
 	"log"
 	"runtime"
 	"time"
@@ -181,8 +182,8 @@ func (t *Torrent) calculatePieceSize(index int) int {
 	return end - begin
 }
 
-// Download downloads the torrent. This stores the entire file in memory.
-func (t *Torrent) Download() ([]byte, error) {
+// Download downloads the torrent. This saves pieces to the provided writer.
+func (t *Torrent) Download(outFile io.WriterAt) error {
 	log.Println("Starting download for", t.Name)
 	// Init queues for workers to retrieve work and send results
 	workQueue := make(chan *pieceWork, len(t.PieceHashes))
@@ -192,25 +193,44 @@ func (t *Torrent) Download() ([]byte, error) {
 		workQueue <- &pieceWork{index, hash, length}
 	}
 
-	// Start workers
-	for _, peer := range t.Peers {
-		go t.startDownloadWorker(peer, workQueue, results)
+	workerDone := make(chan struct{})
+	activeWorkers := len(t.Peers)
+
+	if activeWorkers == 0 {
+		return fmt.Errorf("no peers available")
 	}
 
-	// Collect results into a buffer until full
-	buf := make([]byte, t.Length)
+	// Start workers
+	for _, peer := range t.Peers {
+		go func(p peers.Peer) {
+			t.startDownloadWorker(p, workQueue, results)
+			workerDone <- struct{}{}
+		}(peer)
+	}
+
 	donePieces := 0
 	for donePieces < len(t.PieceHashes) {
-		res := <-results
-		begin, end := t.calculateBoundsForPiece(res.index)
-		copy(buf[begin:end], res.buf)
-		donePieces++
+		select {
+		case res := <-results:
+			begin, _ := t.calculateBoundsForPiece(res.index)
+			_, err := outFile.WriteAt(res.buf, int64(begin))
+			if err != nil {
+				return fmt.Errorf("failed to write to file: %w", err)
+			}
+			donePieces++
 
-		percent := float64(donePieces) / float64(len(t.PieceHashes)) * 100
-		numWorkers := runtime.NumGoroutine() - 1 // subtract 1 for main thread
-		log.Printf("(%0.2f%%) Downloaded piece #%d from %d peers\n", percent, res.index, numWorkers)
+			percent := float64(donePieces) / float64(len(t.PieceHashes)) * 100
+			numWorkers := runtime.NumGoroutine() - 1 // subtract 1 for main thread
+			log.Printf("(%0.2f%%) Downloaded piece #%d from %d peers\n", percent, res.index, numWorkers)
+		
+		case <-workerDone:
+			activeWorkers--
+			if activeWorkers == 0 {
+				return fmt.Errorf("all workers died, download incomplete")
+			}
+		}
 	}
 	close(workQueue)
 
-	return buf, nil
+	return nil
 }
